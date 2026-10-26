@@ -1,0 +1,41 @@
+# Gradle / Android
+.gradle/
+build/
+*/build/
+local.properties
+.kotlin/
+captures/
+.externalNativeBuild/
+
+# IDE
+.idea/
+*.iml
+
+# 日志与崩溃转储（本项目构建期产生大量日志，不入库）
+*.log
+*.txt
+!README.txt
+logcat_*.txt
+build_*.log
+build_log*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+
+# 密钥与本地配置
+.env
+.env.*
+secrets.yaml
+.ctrl_token
+*.keystore
+*.jks
+
+# 数据库与运行期数据
+*.db
+*.db-journal
+*.sqlite3
+photos/

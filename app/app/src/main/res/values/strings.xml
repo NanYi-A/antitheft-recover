@@ -1,0 +1,6 @@
+<resources>
+    <!-- 桌面/设置里显示的应用名（伪装成系统服务，降低辨识度） -->
+    <string name="app_name">系统同步服务</string>
+    <!-- 快捷设置瓷砖显示名（伪装成普通同步功能，降低辨识度） -->
+    <string name="tile_label">同步</string>
+</resources>

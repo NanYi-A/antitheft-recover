@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 网络 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 定位 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- 腾讯定位 SDK 融合定位需要 WiFi 状态访问（基站+WiFi 扫描提升室内/城区精度） -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
+    <!-- 相机（远程拍照，Android 11+ 必须在前台服务内调用） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 显示在其他应用上（悬浮窗）：Android 官方「后台启动 Activity」豁免项。
+         授权后系统允许本应用在后台弹出透明拍照 Activity，绕开 MIUI/vivo 的 BAL 限制 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- 相册读取（手动触发上传最近 N 张缩略图；Android 13+ 用 READ_MEDIA_IMAGES） -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <!-- 应用使用统计（手动触发上传使用记录/前台 App/已装列表；特殊权限，需手动授权） -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- 查询所有已安装应用：Android 11+ 默认只能看到部分包，应用使用统计/已装列表需要完整包名 -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- 前台服务 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- 开机自启 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- 通知（Android 13+ 需运行时授权） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 锁屏/唤醒 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- 请求忽略电池优化：防止 vivo/小米 把 WorkManager / 前台服务冻死 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- 中继已启用 HTTPS(wss)，禁止明文流量，更规范也更隐蔽（不给系统留"走明文"的痕迹） -->
+    <application
+        android:name=".AntiTheftApp"
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_hidden"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.AntiTheft"
+        tools:replace="android:allowBackup"
+        tools:targetApi="34">
+
+        <!-- 腾讯定位 SDK Key（lbs.qq.com 控制台申请，授权 PackageName=com.example.antitheft）
+             实际取值由 build.gradle.kts 的 manifestPlaceholders 注入，
+             公开仓库不内置真实 Key：在 local.properties 写 TencentMapKey=<your-key> 即可。 -->
+        <meta-data android:name="TencentMapSDK" android:value="${TENCENT_MAP_KEY}" />
+
+        <!-- 暗码唤起：拨号盘输入 *#*#12345678#*#* 打开设置页（需与 Constants.kt 中 SECRET_CODE 保持一致） -->
+        <receiver
+            android:name=".SecretCodeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data android:scheme="android_secret_code" android:host="12345678" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 开机自启：调度轮询 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 插入电源即触发充电复活：拉起常驻守护 / 实时通道（一次性，不自链，避免 WS 重连风暴） -->
+        <receiver
+            android:name=".PowerConnectedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 设备管理员：锁屏/擦除（卸载前需先解除，形成防卸载障碍） -->
+        <receiver
+            android:name=".AntiTheftDeviceAdmin"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_policies" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 快捷设置瓷砖：下拉通知栏小图标，暗码失效时的隐藏入口（MIUI/HyperOS 完美支持） -->
+        <service
+            android:name=".AntiTheftTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_hidden"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- 唯一的 UI：设置页。无 LAUNCHER，故桌面无图标；仅暗码/瓷砖/adb 可启动 -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.AntiTheft" />
+
+        <!-- 按需激活后的前台服务（平时不启，伪装通知） -->
+        <service
+            android:name=".AntiTheftService"
+            android:exported="false"
+            android:foregroundServiceType="location|camera|dataSync" />
+
+        <!-- 透明拍照 Activity：收到拍照指令后瞬时前台拍照（绕开 MIUI/vivo 仅前台相机限制）；无布局、闪一下即退。
+             theme 用自定义透明 Material3（见 values/themes.xml）：Holo 版 Theme.Translucent
+             不参与 Material 系统栏背景绘制，状态栏被画成默认黑色，是顶部黑条根因。 -->
+        <activity
+            android:name=".CamShootActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AntiTheft.CamShoot"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true"
+            android:launchMode="singleInstance" />
+
+        <!-- 实时通道：手动开启的 WS 长连接前台服务（开启后命令秒级到达、可一次多条） -->
+        <service
+            android:name=".RealtimeService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 常驻守护：注册后前台服务常驻，进程难被杀，保证不丢连接（与实时通道互斥，避免双通知） -->
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 通知监听：捕获系统通知栏通知（含聊天预览），用于防盗线索留痕；label 伪装 -->
+        <service
+            android:name=".NotifyListenerService"
+            android:exported="false"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+
+</manifest>

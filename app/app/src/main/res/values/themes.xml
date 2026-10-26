@@ -1,0 +1,23 @@
+<resources>
+    <style name="Theme.AntiTheft" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+    </style>
+
+    <!-- 透明拍照 Activity 专用 theme（顶部黑条根治）：
+         之前用 Holo 版 @android:style/Theme.Translucent.NoTitleBar，它在 API21+ 上
+         不参与 Material 系统栏背景绘制，translucent 窗口的状态栏被系统画成默认黑色，
+         代码里 setStatusBarColor(TRANSPARENT) 压不住。这里基于 Material3 定义：
+         窗口全透明 + 状态栏/导航栏透明 + 关闭对比度遮罩，闪屏瞬间整屏透出底层 app。 -->
+    <style name="Theme.AntiTheft.CamShoot">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+    </style>
+</resources>
