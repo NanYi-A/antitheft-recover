@@ -175,7 +175,18 @@ server/                   云端中继
 | `SECRET_CODE` | `Constants.kt` **和** `AndroidManifest.xml` | **必填** | 拨号暗码，两处必须一致 |
 | `TencentMapKey` | `app/local.properties` | **必填** | 腾讯定位 SDK Key（逆地理与定位） |
 | `CTRL_TOKEN` | 服务端环境变量 | **必填** | 控制端鉴权 Token，未配置则服务端拒绝所有控制请求 |
-| `AMAP_WEB_KEY` | 服务端环境变量 | 可选 | 高德逆地理 Key，不配则回退 Nominatim（较慢） |
+| `AMAP_WEB_KEY` | 服务端环境变量 | 可选 | 高德 **Web 服务** Key（服务端 REST 调用，逆地理用），不配则回退 Nominatim（较慢） |
+| `AMAP_JS_KEY` | 服务端环境变量 | 可选 | 高德 **Web 端(JS API)** Key（控制台网页加载地图用），不配则地图底图不显示 |
+| `AMAP_JS_CODE` | 服务端环境变量 | 可选 | 上面那个 JS Key 配套的**安全密钥 securityJsCode**（2021-12-02 后创建的 Key 必须配，否则地图接口报 `INVALID_USER_SCODE`） |
+
+> **三个高德 Key 别搞混**：本项目用到了高德的两类 Key，**它们是独立申请的两套凭证**。
+>
+> | Key 类型 | 控制台里的平台 | 用在哪 | 安全限制 |
+> |---|---|---|---|
+> | Web 服务 Key | 服务平台选「Web服务」 | `restapi.amap.com/v3/geocode/regeo` 逆地理（服务端发起） | **IP 白名单**（填服务器公网 IP），不用域名白名单 |
+> | Web 端 JS Key | 服务平台选「Web端(JS API)」 | `webapi.amap.com/maps?v=2.0` 加载地图（浏览器发起） | **域名白名单**（填站点域名）+ 安全密钥 |
+>
+> 泄露风险也不同：Web 服务 Key 只在服务端用，配了 IP 白名单别人就调不动；JS Key 天生暴露在前端 HTML 里，靠**域名白名单**防盗用。
 
 ---
 
@@ -205,8 +216,12 @@ pip install -r requirements.txt
 # 控制端鉴权 Token —— 必须配置，否则所有控制接口直接拒绝
 export CTRL_TOKEN=$(openssl rand -hex 32)
 
-# 腾讯定位用不到；高德逆地理 Key（可选，不配会回退 Nominatim）
+# 高德 Key（两套，独立申请，详见上面的对照表）
+#   Web 服务 Key —— 服务端逆地理用，配 IP 白名单
 export AMAP_WEB_KEY=你的高德Web服务Key
+#   Web 端 JS Key + 安全密钥 —— 控制台网页加载地图用，配域名白名单
+export AMAP_JS_KEY=你的高德JS端Key
+export AMAP_JS_CODE=你的高德安全密钥
 
 # 把 token 记下来 —— 打开 Web 控制台时需要输入它
 echo "你的控制端 Token 是：$CTRL_TOKEN"
@@ -231,7 +246,7 @@ directory=/www/wwwroot/antitheft-relay
 command=/www/wwwroot/antitheft-relay/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1
 autostart=true
 autorestart=true
-environment=CTRL_TOKEN="你的token",AMAP_WEB_KEY="你的key"
+environment=CTRL_TOKEN="你的token",AMAP_WEB_KEY="你的webservicekey",AMAP_JS_KEY="你的jskey",AMAP_JS_CODE="你的安全密钥"
 ```
 
 #### 1.5 配置 Nginx 反代（提供 HTTPS/WSS）

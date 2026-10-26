@@ -2102,6 +2102,12 @@ def _console_html() -> str:
 .uv-sessions .hint{color:var(--muted);font-size:12px;margin-top:6px}
 @media (max-width:768px){.uv-wrap{padding:12px}.uv-sessions .inner{padding:8px}.uv-sessions th,.uv-sessions td{padding:5px 6px;font-size:11px}}
 </style>
+<script>
+  // JS API 2.0 安全密钥配置（2021-12-02 之后创建的 Key 必须配合使用）。
+  // securityJsCode 从环境变量 AMAP_JS_CODE 注入；未配置时该对象为空，
+  // 地图仍能加载，但高德可能拒绝部分需要后端的能力。
+  window._AMapSecurityConfig = { securityJsCode: "{AMAP_JS_CODE}" };
+</script>
 <script src="https://webapi.amap.com/maps?v=2.0&key={AMAP_JS_KEY}"></script>
 </head>
 <body>
@@ -2988,8 +2994,10 @@ loadDevices();
 </body>
 </html>"""
     # 注入地图 JS 的高德 Key（Web 端 JS API Key，与逆地理用的 AMAP_WEB_KEY 是两个不同的 Key）
+    # AMAP_JS_CODE 是同一 JS Key 配套的「安全密钥」，2021-12-02 之后创建的 Key 必须配置
     js_key = os.environ.get("AMAP_JS_KEY", "")
-    return html.replace("{AMAP_JS_KEY}", js_key)
+    js_code = os.environ.get("AMAP_JS_CODE", "")
+    return html.replace("{AMAP_JS_KEY}", js_key).replace("{AMAP_JS_CODE}", js_code)
 
 
 @router.get("/anti-theft/console")
