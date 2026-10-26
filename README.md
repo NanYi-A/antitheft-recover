@@ -166,6 +166,16 @@ server/                   云端中继
 > **本项目必须搭配一台云服务器运行中继服务**，手机才能被远程控制。
 > 仓库中**不提供任何预置 APK** —— 因为 APK 内置了中继地址，别人直接安装会连到我的服务器。
 > 正确做法是：clone → 改配置 → 自己构建 APK → 部署自己的中继。
+>
+> 整体流程：
+>
+> ```
+> ① 服务器：装中继服务 → 配密钥 → Nginx 反代 HTTPS/WSS
+>                              ↑
+> ② 手机：改 RELAY_BASE 与暗码 → 构建 APK → 安装 → 授予权限与保活
+>                              ↓
+> ③ 浏览器：打开控制台 → 输入 CTRL_TOKEN → 下发指令
+> ```
 
 ### 0. 需要改哪些配置（总览）
 
@@ -196,14 +206,20 @@ server/                   云端中继
 
 #### 1.1 准备服务器
 
-- 一台有公网 IP 的 Linux 服务器（1 核 1G 足够，本项目不吃资源）
-- 一个域名（如 `relay.yourdomain.com`），解析 A 记录指向服务器
-- 开放 80 / 443 端口
+- 一台有公网 IP 的 Linux 服务器（**1 核 1G 足够**，本项目不吃资源）
+- 一个域名（如 `relay.yourdomain.com`），把 A 记录解析到服务器 IP
+- 开放 **80 / 443** 端口（80 用于 certbot 申请证书，443 提供服务）
+
+```bash
+# 验证域名解析生效
+ping -c 1 relay.yourdomain.com
+# 期望看到你服务器的 IP
+```
 
 #### 1.2 上传并安装服务端
 
 ```bash
-# 把 server/ 目录传到服务器，例如 /www/wwwroot/antitheft-relay/
+# 把仓库里的 server/ 目录传到服务器，例如 /www/wwwroot/antitheft-relay/
 cd /www/wwwroot/antitheft-relay
 
 # 创建虚拟环境
@@ -211,6 +227,9 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+> `requirements.txt` 在 `server/` 目录里。如果只传了部分文件，记得把它一起传上去，
+> 或者手动装：`pip install fastapi uvicorn pydantic python-multipart aiofiles requests`。
 
 #### 1.3 配置密钥（关键）
 
@@ -225,20 +244,27 @@ export AMAP_WEB_KEY=你的高德Web服务Key
 export AMAP_JS_KEY=你的高德JS端Key
 export AMAP_JS_CODE=你的高德安全密钥
 
-# 把 token 记下来 —— 打开 Web 控制台时需要输入它
+# 把 token 记下来 —— 第三部分打开控制台时需要输入它
 echo "你的控制端 Token 是：$CTRL_TOKEN"
 ```
 
-> 也可以把 Token 写进项目根目录的 `.ctrl_token` 文件（首行），优先级：环境变量 > `.ctrl_token` 文件。
-> **两者都不配置时，服务端会拒绝所有控制端读写接口**（安全默认），这是刻意设计。
+> 也可以把 Token 写进项目根目录的 `.ctrl_token` 文件（首行）。优先级：**环境变量 > `.ctrl_token` 文件**。
+> **两者都不配置时，服务端会拒绝所有控制端读写接口**（安全默认），这是刻意设计 —— 没有鉴权的公网接口等于把手机交出去。
 
 #### 1.4 启动服务
 
+先手动跑一次，确认没报错：
+
 ```bash
+cd /www/wwwroot/antitheft-relay
+source venv/bin/activate
+export CTRL_TOKEN=你的token
 uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1
 ```
 
 > **必须 `--workers 1`**：本服务用 SQLite 存数据，多进程并发写会导致锁冲突。
+
+看到类似 `Uvicorn running on http://127.0.0.1:8001` 就说明起来了。**Ctrl+C 停掉**，然后交给 supervisor 托管：
 
 用 supervisor 保持常驻（`/etc/supervisor/conf.d/antitheft.conf`）：
 
@@ -249,6 +275,11 @@ command=/www/wwwroot/antitheft-relay/venv/bin/uvicorn main:app --host 127.0.0.1 
 autostart=true
 autorestart=true
 environment=CTRL_TOKEN="你的token",AMAP_WEB_KEY="你的webservicekey",AMAP_JS_KEY="你的jskey",AMAP_JS_CODE="你的安全密钥"
+```
+
+```bash
+supervisorctl reread && supervisorctl update && supervisorctl status antitheft
+# 期望看到 antitheft    RUNNING
 ```
 
 #### 1.5 配置 Nginx 反代（提供 HTTPS/WSS）
@@ -284,9 +315,17 @@ server {
 
 ```bash
 certbot --nginx -d relay.yourdomain.com
+nginx -s reload
 ```
 
 > **为什么必须 HTTPS/WSS**：手机端把 `RELAY_BASE` 里的 `https://` 自动换成 `wss://` 建立实时长连接，明文 HTTP 下 WebSocket 会被浏览器/系统策略拦截，且控制指令与定位数据明文传输存在泄露风险。
+
+**验证中继起来了**：
+
+```bash
+curl https://relay.yourdomain.com/anti-theft/status
+# 期望返回 JSON
+```
 
 ---
 
@@ -314,7 +353,8 @@ object C {
 }
 ```
 
-> 客户端**所有**接口都基于 `RELAY_BASE` 拼接（`RelayApi.kt` 里的 `/anti-theft/register`、`/poll`、`/report`、`/album`…，以及 `RealtimeService.kt` 的 `/ws/anti-theft`），所以改这一处就够了，不需要改任何其他文件。
+> **地址格式要求**：必须带 `https://`，**末尾不要加斜杠或路径**（结尾是域名就停）。
+> 客户端**所有**接口都基于 `RELAY_BASE` 拼接（`RelayApi.kt` 里的 `/anti-theft/register`、`/poll`、`/report`、`/album`…，以及 `RealtimeService.kt` 的 `/ws/anti-theft`），所以**改这一处就够了**，不需要动任何其他文件。
 
 #### 2.3 同步修改暗码（Manifest）
 
@@ -335,6 +375,7 @@ object C {
 ```
 
 > 暗码只能是数字，且**同一台手机上唯一**（这是 Android 系统限制）。
+> 改的时候记得两处一起改（`android:host` 也要改）。
 
 #### 2.4 配置腾讯定位 Key
 
@@ -345,13 +386,12 @@ sdk.dir=/path/to/your/Android/sdk
 TencentMapKey=你的腾讯定位Key
 ```
 
-> ⚠️ **Windows 用户注意**：`local.properties` 是 Java properties 格式，路径里的反斜杠要**写成两个**。
-> 写 `sdk.dir=C:\Users\you\AppData\Local\Android\sdk` 会报
+> ⚠️ **Windows 用户注意**：`local.properties` 是 Java properties 格式，路径里的反斜杠是转义字符。
+> 写成 `sdk.dir=C:\Users\you\AppData\Local\Android\sdk` 会报
 > `IOException: 文件名、目录名或卷标语法不正确`。
-> 正确写法：`sdk.dir=C:\\Users\\you\\AppData\\Local\\Android\\sdk`
-> 或者用正斜杠：`sdk.dir=C:/Users/you/AppData/Local/Android/sdk`
+> **推荐直接用正斜杠**：`sdk.dir=C:/Users/you/AppData/Local/Android/sdk`。
 
-到 https://lbs.qq.com/ 申请 Key，勾选"WebServiceAPI"，授权 PackageName 填 `com.example.antitheft`。
+到 <https://lbs.qq.com/> 申请 Key，勾选「WebServiceAPI」，授权 PackageName 填 `com.example.antitheft`。
 `build.gradle.kts` 会自动把它注入到 Manifest 的 `${TENCENT_MAP_KEY}` 占位符。
 
 #### 2.5 构建
@@ -368,7 +408,7 @@ cd app
 
 产物：`app/app/build/outputs/apk/debug/app-debug.apk`
 
-> 签名：release 配置使用 Android 自带的 debug keystore，因此 **clone 后无需任何私钥即可构建出能直接安装的 APK**。正式发布请自行创建 keystore 并替换 `signingConfigs`。
+> 签名：release 配置使用 Android 自带的 debug keystore（首次构建自动生成），因此 **clone 后无需任何私钥即可构建出能直接安装的 APK**。正式发布请自行创建 keystore 并替换 `signingConfigs`。
 
 #### 2.6 安装与激活
 
@@ -376,20 +416,21 @@ cd app
 adb install -r app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-安装后 App **没有桌面图标**（这是刻意设计，避免被察觉）。激活方式：
+安装后 App **没有桌面图标**（这是刻意设计，避免被察觉）。三种激活方式：
 
-- **方式 A（推荐，跨厂商通用）**：下拉通知栏找到「系统同步服务」磁贴，点一下进入设置页
-  > 部分 ROM 不向第三方 App 派发暗码广播，所以磁贴入口是兼容性最好的方式
-- **方式 B**：拨号盘输入 `*#*#87654321#*#*`
-- **方式 C**：`adb shell am start -n com.example.antitheft/.SettingsActivity`
+| 方式 | 怎么做 | 说明 |
+|---|---|---|
+| **A（推荐）** | 下拉通知栏找到名为「**同步**」的磁贴，点一下 | 跨厂商通用。部分 ROM 不向第三方 App 派发暗码广播，所以磁贴入口兼容性最好 |
+| **B** | 拨号盘输入 `*#*#87654321#*#*` | 就是你在 2.3 步设的暗码 |
+| **C** | `adb shell am start -n com.example.antitheft/.SettingsActivity` | 调试用，不用拨号盘 |
 
-进入设置页后填入中继地址（就是 `RELAY_BASE` 的值），App 会在首次运行时自动注册设备并取得 token。
+进入设置页后填入中继地址（就是 `RELAY_BASE` 的值），App 会在首次运行时**自动注册设备**并取得设备级 token。
 
 #### 2.7 授予权限与保活
 
-首次启动后按提示授予：位置（"始终允许"）、相册、通知、使用情况访问。
+首次启动后按提示授予：**位置**（要选「始终允许」，不是「仅在使用中允许」）、**相册**、**通知**、**使用情况访问**。
 
-**厂商保活是这套系统能否工作的关键**——不同 ROM 会用各种方式杀掉后台服务。App 内置了 `ManufacturerCompat` 兼容层，运行时会识别你的品牌并给出**带一键跳转的引导页**，按提示逐项打开即可：
+**厂商保活是这套系统能否工作的关键** —— 不同 ROM 会用各种方式杀掉后台服务。App 内置了 `ManufacturerCompat` 兼容层，运行时会识别你的品牌并给出**带一键跳转的引导页**，按提示逐项打开即可：
 
 | 品牌 | 必做项 |
 |---|---|
@@ -399,6 +440,14 @@ adb install -r app/app/build/outputs/apk/debug/app-debug.apk
 | OPPO / 一加 / realme | ① 允许自启动 ② 允许后台运行 ③ 电池优化白名单 |
 
 > 这些不是"设置 App"本身的功能，而是**让长连接能持续存活**的必要条件 —— 指令下发与定位上报全靠这条连接。
+> 漏了任何一项，表现为"偶尔连不上"或"过一会儿就离线"。
+
+**怎么确认保活成功**：在设置页看实时连接状态，应该是「已连接」。或者从电脑端看：
+
+```bash
+curl https://relay.yourdomain.com/anti-theft/status
+# 期望在返回的 devices 里看到你的设备，且在线
+```
 
 #### 2.8 打开 Web 控制台
 
